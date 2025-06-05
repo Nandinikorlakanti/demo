@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar } from '@/components/ui/avatar';
 import { Search, Bell, Settings, User, LogOut, Moon, Sun } from 'lucide-react';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,11 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 interface HeaderProps {
-  user?: {
-    name: string;
-    email: string;
-    avatar?: string;
-  };
+  user?: SupabaseUser;
   onLogout?: () => void;
   onThemeToggle?: () => void;
   isDark?: boolean;
@@ -25,6 +22,15 @@ interface HeaderProps {
 
 export const Header = ({ user, onLogout, onThemeToggle, isDark }: HeaderProps) => {
   const [searchQuery, setSearchQuery] = useState('');
+
+  const getUserName = (user: SupabaseUser) => {
+    return user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
+  };
+
+  const getUserInitial = (user: SupabaseUser) => {
+    const name = getUserName(user);
+    return name.charAt(0).toUpperCase();
+  };
 
   return (
     <header className="h-16 border-b bg-white/80 backdrop-blur-md glass flex items-center justify-between px-6 sticky top-0 z-50">
@@ -74,14 +80,14 @@ export const Header = ({ user, onLogout, onThemeToggle, isDark }: HeaderProps) =
               <Button variant="ghost" className="p-1 hover:bg-gray-100 rounded-full">
                 <Avatar className="w-8 h-8">
                   <div className="w-full h-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-medium">
-                    {user.name.charAt(0).toUpperCase()}
+                    {getUserInitial(user)}
                   </div>
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56 glass">
               <div className="px-3 py-2">
-                <p className="text-sm font-medium">{user.name}</p>
+                <p className="text-sm font-medium">{getUserName(user)}</p>
                 <p className="text-xs text-gray-500">{user.email}</p>
               </div>
               <DropdownMenuSeparator />
