@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,16 +5,18 @@ import { Send, Bot, User } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/components/auth/AuthContext';
 import type { Tables } from '@/integrations/supabase/types';
+import { askQuestion, updateWorkspace } from '@/lib/services/qa-service';
 
 type Conversation = Tables<'ai_conversations'>;
 type Message = Tables<'ai_messages'>;
 
 interface AIChatProps {
   workspaceId: string;
+  files: any[];
   type?: 'qa' | 'general';
 }
 
-export const AIChat = ({ workspaceId, type = 'general' }: AIChatProps) => {
+export const AIChat = ({ workspaceId, files, type = 'general' }: AIChatProps) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -109,7 +110,16 @@ export const AIChat = ({ workspaceId, type = 'general' }: AIChatProps) => {
         let aiResponse = '';
         
         if (type === 'qa') {
-          aiResponse = `Based on your workspace documents and context, here's what I found regarding "${userMessage}": This is a demo Q&A response. In a real implementation, this would analyze your workspace files and provide specific answers based on your documents.`;
+          // Convert files to { [filename]: content }
+          const filesMap: { [key: string]: string } = {};
+          files.forEach(f => {
+            filesMap[f.name] = typeof f.content === 'string' ? f.content : JSON.stringify(f.content);
+          });
+          // 1. Update backend with current files
+          await updateWorkspace(workspaceId, filesMap);
+          // 2. Ask the backend
+          const response = await askQuestion(workspaceId, userMessage);
+          aiResponse = response.answer;
         } else {
           aiResponse = `I understand you're asking about "${userMessage}". As an AI assistant, I'm here to help you with your workspace tasks. This is a demo response - in a real implementation, this would connect to an AI service like OpenAI.`;
         }

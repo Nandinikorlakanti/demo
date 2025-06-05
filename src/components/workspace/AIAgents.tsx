@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Bot, MessageSquare, Brain, Tags } from 'lucide-react';
@@ -13,9 +12,10 @@ import { AutoTagGenerator } from './AutoTagGenerator';
 
 interface AIAgentsProps {
   workspaceId: string;
+  files: any[];
 }
 
-export const AIAgents = ({ workspaceId }: AIAgentsProps) => {
+export const AIAgents = ({ workspaceId, files }: AIAgentsProps) => {
   const [showQAAgent, setShowQAAgent] = useState(false);
   const [showTagAgent, setShowTagAgent] = useState(false);
 
@@ -51,7 +51,7 @@ export const AIAgents = ({ workspaceId }: AIAgentsProps) => {
               <span>Q&A Assistant</span>
             </DialogTitle>
           </DialogHeader>
-          <AIChat workspaceId={workspaceId} type="qa" />
+          <AIChat workspaceId={workspaceId} files={files} type="qa" />
         </DialogContent>
       </Dialog>
 

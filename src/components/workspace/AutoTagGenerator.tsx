@@ -1,84 +1,114 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Send, Bot, User, Tags } from 'lucide-react';
+import { Send, Bot, User, Tags, FileText } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/components/auth/AuthContext';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { Tables } from '@/integrations/supabase/types';
+
+type File = Tables<'files'>;
 
 interface AutoTagGeneratorProps {
   workspaceId: string;
+  files?: File[];
 }
 
-export const AutoTagGenerator = ({ workspaceId }: AutoTagGeneratorProps) => {
+export const AutoTagGenerator = ({ workspaceId, files = [] }: AutoTagGeneratorProps) => {
   const { user } = useAuth();
-  const [input, setInput] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedTags, setGeneratedTags] = useState<string[]>([]);
   const [messages, setMessages] = useState<Array<{id: string, role: 'user' | 'assistant', content: string}>>([]);
+  const [fileNameInput, setFileNameInput] = useState('');
+
+  // Show all files in the dropdown, no filtering
+  const selectableFiles = files;
 
   const generateTags = async () => {
-    if (!input.trim()) return;
+    if (!selectedFile) return;
 
-    const userMessage = input.trim();
-    setInput('');
     setIsGenerating(true);
 
     // Add user message
     const userMsg = {
       id: Date.now().toString(),
       role: 'user' as const,
-      content: userMessage
+      content: `Generate tags for file: ${selectedFile.name}`
     };
     setMessages(prev => [...prev, userMsg]);
 
     try {
-      // Simulate tag generation (in real implementation, this would use AI)
-      setTimeout(() => {
-        const sampleTags = [
-          'productivity', 'research', 'planning', 'documentation', 
-          'meeting-notes', 'project', 'ideas', 'important', 
-          'follow-up', 'draft', 'review', 'archive'
-        ];
-        
-        // Generate random tags based on input
-        const numTags = Math.min(5, Math.max(2, Math.floor(Math.random() * 4) + 2));
-        const tags = [];
-        for (let i = 0; i < numTags; i++) {
-          const randomTag = sampleTags[Math.floor(Math.random() * sampleTags.length)];
-          if (!tags.includes(randomTag)) {
-            tags.push(randomTag);
+      // Get file content from Supabase
+      const { data: fileData, error } = await supabase
+        .from('files')
+        .select('content')
+        .eq('id', selectedFile.id)
+        .single();
+
+      if (error) throw error;
+
+      // Extract text content from file
+      let fileContent = '';
+      if (fileData.content) {
+        if (typeof fileData.content === 'string') {
+          fileContent = fileData.content;
+        } else if (typeof fileData.content === 'object' && 'blocks' in fileData.content) {
+          const blocks = (fileData.content as any).blocks;
+          if (Array.isArray(blocks)) {
+            fileContent = blocks[0]?.content || '';
           }
         }
-        
-        setGeneratedTags(tags);
-        
-        const aiResponse = `I've analyzed your content "${userMessage}" and generated ${tags.length} relevant tags: ${tags.join(', ')}. You can apply these tags to your files or modify them as needed.`;
-        
-        const aiMsg = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant' as const,
-          content: aiResponse
-        };
-        
-        setMessages(prev => [...prev, aiMsg]);
-        setIsGenerating(false);
-      }, 1500);
+      }
 
+      // Call backend API to generate tags
+      const response = await fetch('http://localhost:5000/generate-tags', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content: fileContent,
+          filename: selectedFile.name
+        }),
+      });
+
+      if (!response.ok) throw new Error('Failed to generate tags');
+
+      const { tags } = await response.json();
+      setGeneratedTags(tags);
+      
+      const aiResponse = `I've analyzed "${selectedFile.name}" and generated ${tags.length} relevant tags: ${tags.join(', ')}. You can apply these tags to your file or modify them as needed.`;
+      
+      const aiMsg = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant' as const,
+        content: aiResponse
+      };
+      
+      setMessages(prev => [...prev, aiMsg]);
     } catch (error) {
       console.error('Error generating tags:', error);
+      const errorMsg = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant' as const,
+        content: 'Sorry, I encountered an error while generating tags. Please try again.'
+      };
+      setMessages(prev => [...prev, errorMsg]);
+    } finally {
       setIsGenerating(false);
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      generateTags();
-    }
-  };
-
   const applyTag = async (tag: string) => {
+    if (!selectedFile) return;
+
     try {
       // Check if tag already exists
       const { data: existingTag } = await supabase
@@ -88,31 +118,123 @@ export const AutoTagGenerator = ({ workspaceId }: AutoTagGeneratorProps) => {
         .eq('workspace_id', workspaceId)
         .single();
 
+      let tagId;
       if (!existingTag) {
         // Create new tag
-        await supabase
+        const { data: newTag } = await supabase
           .from('tags')
           .insert({
             name: tag,
             workspace_id: workspaceId,
             color: '#' + Math.floor(Math.random()*16777215).toString(16) // Random color
-          });
+          })
+          .select()
+          .single();
+        tagId = newTag?.id;
+      } else {
+        tagId = existingTag.id;
       }
+
+      // Associate tag with file
+      await supabase
+        .from('file_tags')
+        .insert({
+          file_id: selectedFile.id,
+          tag_id: tagId
+        });
       
-      console.log(`Tag "${tag}" applied to workspace`);
+      console.log(`Tag "${tag}" applied to file ${selectedFile.name}`);
     } catch (error) {
       console.error('Error applying tag:', error);
     }
   };
 
+  // Helper to generate tags for a given file
+  async function generateTagsWithFile(file: File) {
+    setIsGenerating(true);
+    setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      role: 'user',
+      content: `Generate tags for file: ${file.name}`
+    }]);
+    try {
+      // 1. Fetch file content from Supabase
+      const { data: fileData, error } = await supabase
+        .from('files')
+        .select('content')
+        .eq('id', file.id)
+        .single();
+      if (error) throw error;
+      let fileContent = '';
+      if (fileData.content) {
+        if (typeof fileData.content === 'string') {
+          fileContent = fileData.content;
+        } else if (typeof fileData.content === 'object' && 'blocks' in fileData.content) {
+          const blocks = (fileData.content as any).blocks;
+          if (Array.isArray(blocks)) {
+            fileContent = blocks[0]?.content || '';
+          }
+        }
+      }
+      // 2. Sync file to disk
+      const syncRes = await fetch('http://localhost:5000/sync-file-to-disk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace: workspaceId,
+          file_name: file.name,
+          content: fileContent
+        })
+      });
+      if (!syncRes.ok) throw new Error('Failed to sync file to disk');
+      // 3. Call the tag generator backend
+      const response = await fetch('http://localhost:5000/generate-tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace: workspaceId,
+          file_name: file.name
+        })
+      });
+      if (!response.ok) throw new Error('Failed to generate tags');
+      const data = await response.json();
+      const tags = data.tags || [];
+      setGeneratedTags(tags);
+      const aiResponse = `I've analyzed "${file.name}" and generated ${tags.length} relevant tags: ${tags.join(', ')}. You can apply these tags to your file or modify them as needed.`;
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: aiResponse
+      }]);
+    } catch (error) {
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: 'Sorry, I encountered an error while generating tags. Please try again.'
+      }]);
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
   return (
     <div className="flex flex-col h-96">
+      {/* File Name Input */}
+      <div className="p-4 border-b">
+        <Input
+          value={fileNameInput}
+          onChange={e => setFileNameInput(e.target.value)}
+          placeholder="Enter file name (e.g. doc2.txt)"
+          disabled={isGenerating}
+        />
+      </div>
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 ? (
           <div className="text-center text-slate-500">
             <Tags className="w-12 h-12 mx-auto mb-2 text-slate-300" />
-            <p>Describe your content to generate relevant tags!</p>
+            <p>Enter a file name and click generate to create tags!</p>
           </div>
         ) : (
           messages.map((message) => (
@@ -181,20 +303,27 @@ export const AutoTagGenerator = ({ workspaceId }: AutoTagGeneratorProps) => {
         </div>
       )}
 
-      {/* Input */}
+      {/* Generate Button */}
       <div className="border-t p-4">
-        <div className="flex space-x-2">
-          <Input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Describe your content to generate tags..."
-            disabled={isGenerating}
-          />
-          <Button onClick={generateTags} disabled={isGenerating || !input.trim()}>
-            <Send className="w-4 h-4" />
-          </Button>
-        </div>
+        <Button 
+          onClick={async () => {
+            const file = files.find(f => f.name === fileNameInput.trim());
+            setSelectedFile(file || null);
+            if (file) {
+              await generateTagsWithFile(file);
+            } else {
+              setMessages(prev => [...prev, {
+                id: Date.now().toString(),
+                role: 'assistant',
+                content: `File "${fileNameInput}" not found in this workspace.`
+              }]);
+            }
+          }}
+          disabled={isGenerating || !fileNameInput.trim()}
+          className="w-full"
+        >
+          {isGenerating ? 'Generating...' : 'Generate Tags'}
+        </Button>
       </div>
     </div>
   );
