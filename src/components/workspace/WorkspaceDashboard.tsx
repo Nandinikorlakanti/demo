@@ -38,20 +38,44 @@ export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProp
     if (!user) return;
 
     try {
-      // Get workspaces where user is owner or member
-      const { data: workspacesData, error } = await supabase
+      console.log('Loading workspaces for user:', user.id);
+      
+      // First get workspaces where user is owner
+      const { data: ownedWorkspaces, error: ownedError } = await supabase
+        .from('workspaces')
+        .select('*')
+        .eq('owner_id', user.id);
+
+      if (ownedError) {
+        console.error('Error loading owned workspaces:', ownedError);
+        throw ownedError;
+      }
+
+      // Then get workspaces where user is a member
+      const { data: memberWorkspaces, error: memberError } = await supabase
         .from('workspaces')
         .select(`
           *,
           workspace_members!inner(role)
         `)
-        .or(`owner_id.eq.${user.id},workspace_members.user_id.eq.${user.id}`);
+        .eq('workspace_members.user_id', user.id);
 
-      if (error) throw error;
+      if (memberError) {
+        console.error('Error loading member workspaces:', memberError);
+        throw memberError;
+      }
+
+      // Combine and deduplicate workspaces
+      const allWorkspaces = [...(ownedWorkspaces || []), ...(memberWorkspaces || [])];
+      const uniqueWorkspaces = allWorkspaces.filter((workspace, index, self) => 
+        index === self.findIndex((w) => w.id === workspace.id)
+      );
+
+      console.log('Found workspaces:', uniqueWorkspaces);
 
       // Get additional data for each workspace
       const enrichedWorkspaces = await Promise.all(
-        (workspacesData || []).map(async (workspace) => {
+        uniqueWorkspaces.map(async (workspace) => {
           // Get member count
           const { count: memberCount } = await supabase
             .from('workspace_members')
@@ -70,7 +94,7 @@ export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProp
 
           return {
             ...workspace,
-            memberCount: memberCount || 0,
+            memberCount: (memberCount || 0) + 1, // +1 for the owner
             documentCount: documentCount || 0,
             lastAccessed: new Date(workspace.updated_at).toLocaleDateString(),
             isOwner
@@ -78,6 +102,7 @@ export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProp
         })
       );
 
+      console.log('Enriched workspaces:', enrichedWorkspaces);
       setWorkspaces(enrichedWorkspaces);
     } catch (error) {
       console.error('Error loading workspaces:', error);
@@ -95,6 +120,8 @@ export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProp
     if (!user) return;
 
     try {
+      console.log('Creating workspace:', workspaceData);
+      
       const { data: newWorkspace, error } = await supabase
         .from('workspaces')
         .insert({
@@ -106,10 +133,15 @@ export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProp
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error creating workspace:', error);
+        throw error;
+      }
+
+      console.log('Created workspace:', newWorkspace);
 
       // Add user as workspace member
-      await supabase
+      const { error: memberError } = await supabase
         .from('workspace_members')
         .insert({
           workspace_id: newWorkspace.id,
@@ -117,11 +149,17 @@ export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProp
           role: 'owner'
         });
 
+      if (memberError) {
+        console.error('Error adding member:', memberError);
+        // Continue anyway, as the workspace was created
+      }
+
       // Reload workspaces
-      loadWorkspaces();
+      await loadWorkspaces();
       setShowCreateModal(false);
     } catch (error) {
       console.error('Error creating workspace:', error);
+      alert('Failed to create workspace. Please try again.');
     }
   };
 

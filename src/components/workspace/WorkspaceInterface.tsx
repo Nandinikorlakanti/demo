@@ -29,13 +29,19 @@ export const WorkspaceInterface = ({ workspace, onBack }: WorkspaceInterfaceProp
 
   const loadFiles = async () => {
     try {
+      console.log('Loading files for workspace:', workspace.id);
       const { data, error } = await supabase
         .from('files')
         .select('*')
         .eq('workspace_id', workspace.id)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error loading files:', error);
+        throw error;
+      }
+      
+      console.log('Loaded files:', data);
       setFiles(data || []);
     } catch (error) {
       console.error('Error loading files:', error);
@@ -48,6 +54,8 @@ export const WorkspaceInterface = ({ workspace, onBack }: WorkspaceInterfaceProp
     if (!user) return;
 
     try {
+      console.log('Creating file:', { name, type, workspaceId: workspace.id });
+      
       const { data, error } = await supabase
         .from('files')
         .insert({
@@ -61,14 +69,25 @@ export const WorkspaceInterface = ({ workspace, onBack }: WorkspaceInterfaceProp
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error creating file:', error);
+        throw error;
+      }
+      
+      console.log('File created:', data);
       setFiles(prev => [data, ...prev]);
       if (type === 'document') {
         setSelectedFile(data);
       }
     } catch (error) {
       console.error('Error creating file:', error);
+      alert('Failed to create file. Please try again.');
     }
+  };
+
+  const handleFileUpload = (newFile: File) => {
+    console.log('File uploaded:', newFile);
+    setFiles(prev => [newFile, ...prev]);
   };
 
   const handleFileSelect = (file: File) => {
@@ -77,37 +96,53 @@ export const WorkspaceInterface = ({ workspace, onBack }: WorkspaceInterfaceProp
 
   const handleFileUpdate = async (fileId: string, content: any) => {
     try {
+      console.log('Updating file:', fileId, content);
+      
       const { error } = await supabase
         .from('files')
         .update({ content, updated_at: new Date().toISOString() })
         .eq('id', fileId);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error updating file:', error);
+        throw error;
+      }
       
       // Update local state
       setFiles(prev => prev.map(f => 
         f.id === fileId ? { ...f, content, updated_at: new Date().toISOString() } : f
       ));
+      
+      console.log('File updated successfully');
     } catch (error) {
       console.error('Error updating file:', error);
+      alert('Failed to save file. Please try again.');
     }
   };
 
   const handleFileDelete = async (fileId: string) => {
     try {
+      console.log('Deleting file:', fileId);
+      
       const { error } = await supabase
         .from('files')
         .delete()
         .eq('id', fileId);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error deleting file:', error);
+        throw error;
+      }
       
       setFiles(prev => prev.filter(f => f.id !== fileId));
       if (selectedFile?.id === fileId) {
         setSelectedFile(null);
       }
+      
+      console.log('File deleted successfully');
     } catch (error) {
       console.error('Error deleting file:', error);
+      alert('Failed to delete file. Please try again.');
     }
   };
 
@@ -136,7 +171,9 @@ export const WorkspaceInterface = ({ workspace, onBack }: WorkspaceInterfaceProp
           onFileSelect={handleFileSelect}
           onFileCreate={handleFileCreate}
           onFileDelete={handleFileDelete}
+          onFileUpload={handleFileUpload}
           isLoading={isLoading}
+          workspaceId={workspace.id}
         />
       </div>
 

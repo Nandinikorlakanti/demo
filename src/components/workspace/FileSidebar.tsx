@@ -25,6 +25,8 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/components/auth/AuthContext';
 import type { Tables } from '@/integrations/supabase/types';
 
 type File = Tables<'files'>;
@@ -35,7 +37,9 @@ interface FileSidebarProps {
   onFileSelect: (file: File) => void;
   onFileCreate: (name: string, type: 'document' | 'folder') => void;
   onFileDelete: (fileId: string) => void;
+  onFileUpload: (file: File) => void;
   isLoading: boolean;
+  workspaceId: string;
 }
 
 export const FileSidebar = ({
@@ -44,12 +48,16 @@ export const FileSidebar = ({
   onFileSelect,
   onFileCreate,
   onFileDelete,
-  isLoading
+  onFileUpload,
+  isLoading,
+  workspaceId
 }: FileSidebarProps) => {
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newFileName, setNewFileName] = useState('');
   const [createType, setCreateType] = useState<'document' | 'folder'>('document');
+  const [isUploading, setIsUploading] = useState(false);
 
   const filteredFiles = files.filter(file =>
     file.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -60,6 +68,73 @@ export const FileSidebar = ({
       onFileCreate(newFileName.trim(), createType);
       setNewFileName('');
       setShowCreateDialog(false);
+    }
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const uploadedFiles = event.target.files;
+    if (!uploadedFiles || !user) return;
+
+    setIsUploading(true);
+    try {
+      for (const file of Array.from(uploadedFiles)) {
+        console.log('Uploading file:', file.name);
+        
+        // Upload to Supabase Storage
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${user.id}/${workspaceId}/${Date.now()}.${fileExt}`;
+        
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('workspace-files')
+          .upload(fileName, file);
+
+        if (uploadError) {
+          console.error('Upload error:', uploadError);
+          throw uploadError;
+        }
+
+        console.log('File uploaded:', uploadData);
+
+        // Get the file type based on extension
+        const getFileType = (filename: string): 'document' | 'image' | 'pdf' | 'video' | 'other' => {
+          const ext = filename.split('.').pop()?.toLowerCase();
+          if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || '')) return 'image';
+          if (ext === 'pdf') return 'pdf';
+          if (['mp4', 'avi', 'mov', 'wmv'].includes(ext || '')) return 'video';
+          if (['doc', 'docx', 'txt', 'md'].includes(ext || '')) return 'document';
+          return 'other';
+        };
+
+        // Create file record in database
+        const { data: fileRecord, error: dbError } = await supabase
+          .from('files')
+          .insert({
+            workspace_id: workspaceId,
+            name: file.name,
+            type: getFileType(file.name),
+            size_bytes: file.size,
+            file_path: uploadData.path,
+            created_by: user.id,
+            is_folder: false
+          })
+          .select()
+          .single();
+
+        if (dbError) {
+          console.error('Database error:', dbError);
+          throw dbError;
+        }
+
+        console.log('File record created:', fileRecord);
+        onFileUpload(fileRecord);
+      }
+    } catch (error) {
+      console.error('Error uploading files:', error);
+      alert('Failed to upload files. Please try again.');
+    } finally {
+      setIsUploading(false);
+      // Reset the input
+      event.target.value = '';
     }
   };
 
@@ -190,10 +265,19 @@ export const FileSidebar = ({
 
       {/* Upload Button */}
       <div className="p-4 border-t">
-        <Button variant="outline" className="w-full">
-          <Upload className="w-4 h-4 mr-2" />
-          Upload Files
-        </Button>
+        <div className="relative">
+          <input
+            type="file"
+            multiple
+            onChange={handleFileUpload}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            disabled={isUploading}
+          />
+          <Button variant="outline" className="w-full" disabled={isUploading}>
+            <Upload className="w-4 h-4 mr-2" />
+            {isUploading ? 'Uploading...' : 'Upload Files'}
+          </Button>
+        </div>
       </div>
     </div>
   );
