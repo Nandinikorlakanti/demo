@@ -4,7 +4,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/components/auth/AuthContext';
 import { FileSidebar } from './FileSidebar';
 import { FileEditor } from './FileEditor';
-import { AIAgents } from './AIAgents';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import type { Tables } from '@/integrations/supabase/types';
@@ -61,7 +60,7 @@ export const WorkspaceInterface = ({ workspace, onBack }: WorkspaceInterfaceProp
         .insert({
           workspace_id: workspace.id,
           name,
-          type: type === 'folder' ? 'document' : 'document',
+          type: 'document',
           is_folder: type === 'folder',
           created_by: user.id,
           content: type === 'document' ? { blocks: [] } : null
@@ -197,9 +196,6 @@ export const WorkspaceInterface = ({ workspace, onBack }: WorkspaceInterfaceProp
           </div>
         )}
       </div>
-
-      {/* AI Agents */}
-      <AIAgents workspaceId={workspace.id} />
     </div>
   );
 };

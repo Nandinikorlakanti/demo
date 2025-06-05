@@ -27,7 +27,12 @@ export const FileEditor = ({ file, onUpdate }: FileEditorProps) => {
     if (file.content && typeof file.content === 'object' && 'blocks' in file.content) {
       setBlocks((file.content as any).blocks || []);
     } else {
-      setBlocks([]);
+      // Initialize with empty content if file has no content
+      setBlocks([{
+        id: Date.now().toString(),
+        type: 'text',
+        content: ''
+      }]);
     }
     setHasChanges(false);
   }, [file]);

@@ -80,42 +80,17 @@ export const FileSidebar = ({
       for (const file of Array.from(uploadedFiles)) {
         console.log('Uploading file:', file.name);
         
-        // Upload to Supabase Storage
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${user.id}/${workspaceId}/${Date.now()}.${fileExt}`;
-        
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('workspace-files')
-          .upload(fileName, file);
-
-        if (uploadError) {
-          console.error('Upload error:', uploadError);
-          throw uploadError;
-        }
-
-        console.log('File uploaded:', uploadData);
-
-        // Get the file type based on extension
-        const getFileType = (filename: string): 'document' | 'image' | 'pdf' | 'video' | 'other' => {
-          const ext = filename.split('.').pop()?.toLowerCase();
-          if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || '')) return 'image';
-          if (ext === 'pdf') return 'pdf';
-          if (['mp4', 'avi', 'mov', 'wmv'].includes(ext || '')) return 'video';
-          if (['doc', 'docx', 'txt', 'md'].includes(ext || '')) return 'document';
-          return 'other';
-        };
-
-        // Create file record in database
+        // Create file record in database first (without storage path)
         const { data: fileRecord, error: dbError } = await supabase
           .from('files')
           .insert({
             workspace_id: workspaceId,
             name: file.name,
-            type: getFileType(file.name),
+            type: 'document',
             size_bytes: file.size,
-            file_path: uploadData.path,
             created_by: user.id,
-            is_folder: false
+            is_folder: false,
+            content: null
           })
           .select()
           .single();
@@ -143,8 +118,6 @@ export const FileSidebar = ({
     switch (file.type) {
       case 'document':
         return FileText;
-      case 'image':
-        return File;
       default:
         return File;
     }
