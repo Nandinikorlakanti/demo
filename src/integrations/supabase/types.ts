@@ -461,7 +461,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      is_workspace_member: {
+        Args: { workspace_id: string }
+        Returns: boolean
+      }
+      is_workspace_owner: {
+        Args: { workspace_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       document_block_type:
