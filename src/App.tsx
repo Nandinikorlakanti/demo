@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from './components/auth/AuthContext';
 import { AuthPage } from './components/auth/AuthPage';
 import { WorkspaceDashboard } from './components/workspace/WorkspaceDashboard';
 import { WorkspaceInterface } from './components/workspace/WorkspaceInterface';
+import { GraphBuilder } from './components/graph/GraphBuilder';
 import { Header } from './components/layout/Header';
 import type { Tables } from '@/integrations/supabase/types';
 import './styles/theme.css';
@@ -26,9 +27,24 @@ const AppContent = () => {
   const { user, logout } = useAuth();
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
+  const [showGraphBuilder, setShowGraphBuilder] = useState(false);
 
   if (!user) {
     return <AuthPage />;
+  }
+
+  if (showGraphBuilder) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+        <Header 
+          user={user} 
+          onLogout={logout}
+          onThemeToggle={() => setIsDarkMode(!isDarkMode)}
+          isDark={isDarkMode}
+        />
+        <GraphBuilder onBack={() => setShowGraphBuilder(false)} />
+      </div>
+    );
   }
 
   if (!currentWorkspace) {
@@ -40,7 +56,10 @@ const AppContent = () => {
           onThemeToggle={() => setIsDarkMode(!isDarkMode)}
           isDark={isDarkMode}
         />
-        <WorkspaceDashboard onSelectWorkspace={setCurrentWorkspace} />
+        <WorkspaceDashboard 
+          onSelectWorkspace={setCurrentWorkspace}
+          onOpenGraphBuilder={() => setShowGraphBuilder(true)}
+        />
       </div>
     );
   }

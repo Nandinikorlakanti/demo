@@ -12,9 +12,10 @@ type Message = Tables<'ai_messages'>;
 
 interface AIChatProps {
   workspaceId: string;
+  type?: 'qa' | 'general';
 }
 
-export const AIChat = ({ workspaceId }: AIChatProps) => {
+export const AIChat = ({ workspaceId, type = 'general' }: AIChatProps) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -23,18 +24,21 @@ export const AIChat = ({ workspaceId }: AIChatProps) => {
 
   useEffect(() => {
     initializeConversation();
-  }, [workspaceId]);
+  }, [workspaceId, type]);
 
   const initializeConversation = async () => {
     if (!user) return;
 
     try {
-      // Try to find existing conversation
+      // Try to find existing conversation of this type
+      const conversationTitle = type === 'qa' ? 'Q&A Assistant' : 'AI Assistant Chat';
+      
       const { data: existingConversations } = await supabase
         .from('ai_conversations')
         .select('*')
         .eq('workspace_id', workspaceId)
         .eq('user_id', user.id)
+        .eq('title', conversationTitle)
         .order('updated_at', { ascending: false })
         .limit(1);
 
@@ -49,7 +53,7 @@ export const AIChat = ({ workspaceId }: AIChatProps) => {
           .insert({
             workspace_id: workspaceId,
             user_id: user.id,
-            title: 'AI Assistant Chat'
+            title: conversationTitle
           })
           .select()
           .single();
@@ -100,9 +104,15 @@ export const AIChat = ({ workspaceId }: AIChatProps) => {
 
       setMessages(prev => [...prev, userMsg]);
 
-      // Simulate AI response (replace with actual AI integration)
+      // Generate AI response based on type
       setTimeout(async () => {
-        const aiResponse = `I understand you're asking about "${userMessage}". As an AI assistant, I'm here to help you with your workspace tasks. This is a demo response - in a real implementation, this would connect to an AI service like OpenAI.`;
+        let aiResponse = '';
+        
+        if (type === 'qa') {
+          aiResponse = `Based on your workspace documents and context, here's what I found regarding "${userMessage}": This is a demo Q&A response. In a real implementation, this would analyze your workspace files and provide specific answers based on your documents.`;
+        } else {
+          aiResponse = `I understand you're asking about "${userMessage}". As an AI assistant, I'm here to help you with your workspace tasks. This is a demo response - in a real implementation, this would connect to an AI service like OpenAI.`;
+        }
 
         const { data: aiMsg, error: aiError } = await supabase
           .from('ai_messages')
@@ -133,6 +143,18 @@ export const AIChat = ({ workspaceId }: AIChatProps) => {
     }
   };
 
+  const getPlaceholder = () => {
+    return type === 'qa' 
+      ? 'Ask questions about your workspace documents...'
+      : 'Ask me anything...';
+  };
+
+  const getWelcomeMessage = () => {
+    return type === 'qa'
+      ? 'Ask me questions about your workspace documents!'
+      : 'Start a conversation with your AI assistant!';
+  };
+
   return (
     <div className="flex flex-col h-96">
       {/* Messages */}
@@ -140,7 +162,7 @@ export const AIChat = ({ workspaceId }: AIChatProps) => {
         {messages.length === 0 ? (
           <div className="text-center text-slate-500">
             <Bot className="w-12 h-12 mx-auto mb-2 text-slate-300" />
-            <p>Start a conversation with your AI assistant!</p>
+            <p>{getWelcomeMessage()}</p>
           </div>
         ) : (
           messages.map((message) => (
@@ -195,7 +217,7 @@ export const AIChat = ({ workspaceId }: AIChatProps) => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="Ask me anything..."
+            placeholder={getPlaceholder()}
             disabled={isLoading}
           />
           <Button onClick={sendMessage} disabled={isLoading || !input.trim()}>

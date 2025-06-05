@@ -1,13 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Plus, Search, Grid, List } from 'lucide-react';
-import { WorkspaceCard } from './WorkspaceCard';
+import { Plus, Network } from 'lucide-react';
 import { CreateWorkspaceModal } from './CreateWorkspaceModal';
+import { WorkspaceCard } from './WorkspaceCard';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/components/auth/AuthContext';
-import { useToast } from '@/hooks/use-toast';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Workspace = Tables<'workspaces'> & {
@@ -19,16 +17,14 @@ type Workspace = Tables<'workspaces'> & {
 
 interface WorkspaceDashboardProps {
   onSelectWorkspace: (workspace: Workspace) => void;
+  onOpenGraphBuilder: () => void;
 }
 
-export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProps) => {
+export const WorkspaceDashboard = ({ onSelectWorkspace, onOpenGraphBuilder }: WorkspaceDashboardProps) => {
   const { user } = useAuth();
-  const { toast } = useToast();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [showCreateModal, setShowCreateModal] = useState(false);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -38,106 +34,52 @@ export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProp
 
   const loadWorkspaces = async () => {
     if (!user) return;
-
+    
     try {
       console.log('Loading workspaces for user:', user.id);
       
-      // Get workspaces where user is owner or member
-      const { data: workspacesData, error: workspacesError } = await supabase
+      const { data, error } = await supabase
         .from('workspaces')
         .select('*')
+        .eq('owner_id', user.id)
         .order('created_at', { ascending: false });
 
-      if (workspacesError) {
-        console.error('Error loading workspaces:', workspacesError);
-        toast({
-          title: "Error loading workspaces",
-          description: workspacesError.message,
-          variant: "destructive",
-        });
-        return;
+      if (error) {
+        console.error('Error loading workspaces:', error);
+        throw error;
       }
 
-      console.log('Found workspaces:', workspacesData);
+      console.log('Loaded workspaces:', data);
+      
+      // Transform data to match expected type
+      const transformedWorkspaces: Workspace[] = (data || []).map(workspace => ({
+        ...workspace,
+        memberCount: 1, // Owner is always a member
+        documentCount: 0, // Will be loaded separately if needed
+        lastAccessed: workspace.updated_at,
+        isOwner: true
+      }));
 
-      // Get additional data for each workspace
-      const enrichedWorkspaces = await Promise.all(
-        (workspacesData || []).map(async (workspace) => {
-          try {
-            // Get member count
-            const { count: memberCount } = await supabase
-              .from('workspace_members')
-              .select('*', { count: 'exact' })
-              .eq('workspace_id', workspace.id);
-
-            // Get document count
-            const { count: documentCount } = await supabase
-              .from('files')
-              .select('*', { count: 'exact' })
-              .eq('workspace_id', workspace.id)
-              .eq('is_folder', false);
-
-            // Check if user is owner
-            const isOwner = workspace.owner_id === user.id;
-
-            return {
-              ...workspace,
-              memberCount: (memberCount || 0) + 1, // +1 for the owner
-              documentCount: documentCount || 0,
-              lastAccessed: new Date(workspace.updated_at).toLocaleDateString(),
-              isOwner
-            };
-          } catch (error) {
-            console.error('Error enriching workspace:', workspace.id, error);
-            return {
-              ...workspace,
-              memberCount: 1,
-              documentCount: 0,
-              lastAccessed: new Date(workspace.updated_at).toLocaleDateString(),
-              isOwner: workspace.owner_id === user.id
-            };
-          }
-        })
-      );
-
-      console.log('Enriched workspaces:', enrichedWorkspaces);
-      setWorkspaces(enrichedWorkspaces);
+      setWorkspaces(transformedWorkspaces);
     } catch (error) {
       console.error('Error loading workspaces:', error);
-      toast({
-        title: "Error loading workspaces",
-        description: "Failed to load workspaces. Please try again.",
-        variant: "destructive",
-      });
     } finally {
       setIsLoading(false);
     }
   };
 
-  const filteredWorkspaces = workspaces.filter(workspace =>
-    workspace.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    workspace.description?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const handleCreateWorkspace = async (workspaceData: { name: string; description: string; color: string }) => {
-    if (!user) {
-      toast({
-        title: "Authentication required",
-        description: "You must be logged in to create a workspace.",
-        variant: "destructive",
-      });
-      return;
-    }
+  const handleCreateWorkspace = async (name: string, description: string, color: string) => {
+    if (!user) return;
 
     try {
-      console.log('Creating workspace:', workspaceData);
+      console.log('Creating workspace:', { name, description, color });
       
-      const { data: newWorkspace, error } = await supabase
+      const { data, error } = await supabase
         .from('workspaces')
         .insert({
-          name: workspaceData.name,
-          description: workspaceData.description,
-          color: workspaceData.color,
+          name,
+          description,
+          color,
           owner_id: user.id
         })
         .select()
@@ -145,175 +87,80 @@ export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProp
 
       if (error) {
         console.error('Error creating workspace:', error);
-        toast({
-          title: "Error creating workspace",
-          description: error.message,
-          variant: "destructive",
-        });
         throw error;
       }
 
-      console.log('Created workspace:', newWorkspace);
+      console.log('Workspace created:', data);
+      
+      // Transform the new workspace to match expected type
+      const newWorkspace: Workspace = {
+        ...data,
+        memberCount: 1,
+        documentCount: 0,
+        lastAccessed: data.created_at,
+        isOwner: true
+      };
 
-      // Add user as workspace member with owner role
-      const { error: memberError } = await supabase
-        .from('workspace_members')
-        .insert({
-          workspace_id: newWorkspace.id,
-          user_id: user.id,
-          role: 'owner'
-        });
-
-      if (memberError) {
-        console.error('Error adding member:', memberError);
-        // Don't throw here as the workspace was created successfully
-        toast({
-          title: "Workspace created",
-          description: "Workspace created successfully, but there was an issue adding you as a member.",
-          variant: "default",
-        });
-      } else {
-        toast({
-          title: "Workspace created",
-          description: `"${workspaceData.name}" has been created successfully.`,
-          variant: "default",
-        });
-      }
-
-      // Reload workspaces to show the new one
-      await loadWorkspaces();
+      setWorkspaces(prev => [newWorkspace, ...prev]);
       setShowCreateModal(false);
     } catch (error) {
       console.error('Error creating workspace:', error);
-      // Error toast already shown above
+      alert('Failed to create workspace. Please try again.');
     }
   };
-
-  const handleDeleteWorkspace = async (workspace: Workspace) => {
-    if (!workspace.isOwner) {
-      toast({
-        title: "Permission denied",
-        description: "Only workspace owners can delete workspaces.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from('workspaces')
-        .delete()
-        .eq('id', workspace.id);
-
-      if (error) {
-        console.error('Error deleting workspace:', error);
-        toast({
-          title: "Error deleting workspace",
-          description: error.message,
-          variant: "destructive",
-        });
-        throw error;
-      }
-      
-      // Remove from local state
-      setWorkspaces(prev => prev.filter(w => w.id !== workspace.id));
-      toast({
-        title: "Workspace deleted",
-        description: `"${workspace.name}" has been deleted successfully.`,
-        variant: "default",
-      });
-    } catch (error) {
-      console.error('Error deleting workspace:', error);
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-slate-600">Loading workspaces...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 p-6">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-800 mb-2">Your Workspaces</h1>
-            <p className="text-slate-600">Manage and access your collaborative workspaces</p>
-          </div>
-          
-          <Button 
-            onClick={() => setShowCreateModal(true)}
-            className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white ripple"
-          >
+    <div className="max-w-7xl mx-auto px-6 py-8">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-800">My Workspaces</h1>
+          <p className="text-slate-600 mt-2">Organize your documents and collaborate with your team</p>
+        </div>
+        <div className="flex space-x-3">
+          <Button onClick={onOpenGraphBuilder} variant="outline">
+            <Network className="w-4 h-4 mr-2" />
+            Graph Builder
+          </Button>
+          <Button onClick={() => setShowCreateModal(true)}>
             <Plus className="w-4 h-4 mr-2" />
             New Workspace
           </Button>
         </div>
+      </div>
 
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center space-x-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <Input
-                placeholder="Search workspaces..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 w-80 bg-white/50 glass"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-2">
-            <Button
-              variant={viewMode === 'grid' ? 'default' : 'ghost'}
-              size="icon"
-              onClick={() => setViewMode('grid')}
-            >
-              <Grid className="w-4 h-4" />
-            </Button>
-            <Button
-              variant={viewMode === 'list' ? 'default' : 'ghost'}
-              size="icon"
-              onClick={() => setViewMode('list')}
-            >
-              <List className="w-4 h-4" />
-            </Button>
-          </div>
+      {/* Workspaces Grid */}
+      {isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="h-48 bg-slate-200 rounded-lg animate-pulse" />
+          ))}
         </div>
-
-        <div className={`grid gap-6 ${viewMode === 'grid' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
-          {filteredWorkspaces.map((workspace) => (
+      ) : workspaces.length === 0 ? (
+        <div className="text-center py-12">
+          <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Plus className="w-8 h-8 text-slate-400" />
+          </div>
+          <h3 className="text-xl font-semibold text-slate-700 mb-2">No workspaces yet</h3>
+          <p className="text-slate-500 mb-6">Create your first workspace to get started</p>
+          <Button onClick={() => setShowCreateModal(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            Create Workspace
+          </Button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {workspaces.map((workspace) => (
             <WorkspaceCard
               key={workspace.id}
               workspace={workspace}
-              onOpen={onSelectWorkspace}
-              onEdit={(w) => console.log('Edit workspace:', w)}
-              onDelete={handleDeleteWorkspace}
+              onClick={() => onSelectWorkspace(workspace)}
             />
           ))}
         </div>
+      )}
 
-        {filteredWorkspaces.length === 0 && !isLoading && (
-          <div className="text-center py-12">
-            <p className="text-slate-500 mb-4">
-              {searchQuery ? 'No workspaces found' : 'No workspaces yet'}
-            </p>
-            <Button 
-              onClick={() => setShowCreateModal(true)}
-              variant="outline"
-            >
-              Create your first workspace
-            </Button>
-          </div>
-        )}
-      </div>
-
+      {/* Create Workspace Modal */}
       <CreateWorkspaceModal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}

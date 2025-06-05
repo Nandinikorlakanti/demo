@@ -71,6 +71,15 @@ export const FileSidebar = ({
     }
   };
 
+  const readFileContent = (file: globalThis.File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.onerror = (e) => reject(e);
+      reader.readAsText(file);
+    });
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFiles = event.target.files;
     if (!uploadedFiles || !user) return;
@@ -80,7 +89,25 @@ export const FileSidebar = ({
       for (const file of Array.from(uploadedFiles)) {
         console.log('Uploading file:', file.name);
         
-        // Create file record in database first (without storage path)
+        // Read file content
+        let content = null;
+        try {
+          const fileContent = await readFileContent(file);
+          // Create blocks from file content for text files
+          if (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.md')) {
+            content = {
+              blocks: [{
+                id: Date.now().toString(),
+                type: 'text',
+                content: fileContent
+              }]
+            };
+          }
+        } catch (error) {
+          console.warn('Could not read file content:', error);
+        }
+        
+        // Create file record in database
         const { data: fileRecord, error: dbError } = await supabase
           .from('files')
           .insert({
@@ -90,7 +117,7 @@ export const FileSidebar = ({
             size_bytes: file.size,
             created_by: user.id,
             is_folder: false,
-            content: null
+            content: content
           })
           .select()
           .single();

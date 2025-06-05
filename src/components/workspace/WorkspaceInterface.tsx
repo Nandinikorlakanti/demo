@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/components/auth/AuthContext';
 import { FileSidebar } from './FileSidebar';
 import { FileEditor } from './FileEditor';
+import { AIAgents } from './AIAgents';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import type { Tables } from '@/integrations/supabase/types';
@@ -146,7 +146,7 @@ export const WorkspaceInterface = ({ workspace, onBack }: WorkspaceInterfaceProp
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex relative">
       {/* Header */}
       <div className="absolute top-0 left-0 right-0 z-10 bg-white/80 backdrop-blur-sm border-b px-6 py-4">
         <div className="flex items-center justify-between">
@@ -196,6 +196,9 @@ export const WorkspaceInterface = ({ workspace, onBack }: WorkspaceInterfaceProp
           </div>
         )}
       </div>
+
+      {/* AI Agents */}
+      <AIAgents workspaceId={workspace.id} />
     </div>
   );
 };
