@@ -7,6 +7,7 @@ import { WorkspaceCard } from './WorkspaceCard';
 import { CreateWorkspaceModal } from './CreateWorkspaceModal';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/components/auth/AuthContext';
+import { useToast } from '@/hooks/use-toast';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Workspace = Tables<'workspaces'> & {
@@ -22,6 +23,7 @@ interface WorkspaceDashboardProps {
 
 export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProps) => {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -40,65 +42,61 @@ export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProp
     try {
       console.log('Loading workspaces for user:', user.id);
       
-      // First get workspaces where user is owner
-      const { data: ownedWorkspaces, error: ownedError } = await supabase
+      // Get workspaces where user is owner or member
+      const { data: workspacesData, error: workspacesError } = await supabase
         .from('workspaces')
         .select('*')
-        .eq('owner_id', user.id);
+        .order('created_at', { ascending: false });
 
-      if (ownedError) {
-        console.error('Error loading owned workspaces:', ownedError);
-        throw ownedError;
+      if (workspacesError) {
+        console.error('Error loading workspaces:', workspacesError);
+        toast({
+          title: "Error loading workspaces",
+          description: workspacesError.message,
+          variant: "destructive",
+        });
+        return;
       }
 
-      // Then get workspaces where user is a member
-      const { data: memberWorkspaces, error: memberError } = await supabase
-        .from('workspaces')
-        .select(`
-          *,
-          workspace_members!inner(role)
-        `)
-        .eq('workspace_members.user_id', user.id);
-
-      if (memberError) {
-        console.error('Error loading member workspaces:', memberError);
-        throw memberError;
-      }
-
-      // Combine and deduplicate workspaces
-      const allWorkspaces = [...(ownedWorkspaces || []), ...(memberWorkspaces || [])];
-      const uniqueWorkspaces = allWorkspaces.filter((workspace, index, self) => 
-        index === self.findIndex((w) => w.id === workspace.id)
-      );
-
-      console.log('Found workspaces:', uniqueWorkspaces);
+      console.log('Found workspaces:', workspacesData);
 
       // Get additional data for each workspace
       const enrichedWorkspaces = await Promise.all(
-        uniqueWorkspaces.map(async (workspace) => {
-          // Get member count
-          const { count: memberCount } = await supabase
-            .from('workspace_members')
-            .select('*', { count: 'exact' })
-            .eq('workspace_id', workspace.id);
+        (workspacesData || []).map(async (workspace) => {
+          try {
+            // Get member count
+            const { count: memberCount } = await supabase
+              .from('workspace_members')
+              .select('*', { count: 'exact' })
+              .eq('workspace_id', workspace.id);
 
-          // Get document count
-          const { count: documentCount } = await supabase
-            .from('files')
-            .select('*', { count: 'exact' })
-            .eq('workspace_id', workspace.id)
-            .eq('is_folder', false);
+            // Get document count
+            const { count: documentCount } = await supabase
+              .from('files')
+              .select('*', { count: 'exact' })
+              .eq('workspace_id', workspace.id)
+              .eq('is_folder', false);
 
-          // Check if user is owner
-          const isOwner = workspace.owner_id === user.id;
+            // Check if user is owner
+            const isOwner = workspace.owner_id === user.id;
 
-          return {
-            ...workspace,
-            memberCount: (memberCount || 0) + 1, // +1 for the owner
-            documentCount: documentCount || 0,
-            lastAccessed: new Date(workspace.updated_at).toLocaleDateString(),
-            isOwner
-          };
+            return {
+              ...workspace,
+              memberCount: (memberCount || 0) + 1, // +1 for the owner
+              documentCount: documentCount || 0,
+              lastAccessed: new Date(workspace.updated_at).toLocaleDateString(),
+              isOwner
+            };
+          } catch (error) {
+            console.error('Error enriching workspace:', workspace.id, error);
+            return {
+              ...workspace,
+              memberCount: 1,
+              documentCount: 0,
+              lastAccessed: new Date(workspace.updated_at).toLocaleDateString(),
+              isOwner: workspace.owner_id === user.id
+            };
+          }
         })
       );
 
@@ -106,6 +104,11 @@ export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProp
       setWorkspaces(enrichedWorkspaces);
     } catch (error) {
       console.error('Error loading workspaces:', error);
+      toast({
+        title: "Error loading workspaces",
+        description: "Failed to load workspaces. Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setIsLoading(false);
     }
@@ -117,7 +120,14 @@ export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProp
   );
 
   const handleCreateWorkspace = async (workspaceData: { name: string; description: string; color: string }) => {
-    if (!user) return;
+    if (!user) {
+      toast({
+        title: "Authentication required",
+        description: "You must be logged in to create a workspace.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     try {
       console.log('Creating workspace:', workspaceData);
@@ -135,12 +145,17 @@ export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProp
 
       if (error) {
         console.error('Error creating workspace:', error);
+        toast({
+          title: "Error creating workspace",
+          description: error.message,
+          variant: "destructive",
+        });
         throw error;
       }
 
       console.log('Created workspace:', newWorkspace);
 
-      // Add user as workspace member
+      // Add user as workspace member with owner role
       const { error: memberError } = await supabase
         .from('workspace_members')
         .insert({
@@ -151,20 +166,38 @@ export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProp
 
       if (memberError) {
         console.error('Error adding member:', memberError);
-        // Continue anyway, as the workspace was created
+        // Don't throw here as the workspace was created successfully
+        toast({
+          title: "Workspace created",
+          description: "Workspace created successfully, but there was an issue adding you as a member.",
+          variant: "default",
+        });
+      } else {
+        toast({
+          title: "Workspace created",
+          description: `"${workspaceData.name}" has been created successfully.`,
+          variant: "default",
+        });
       }
 
-      // Reload workspaces
+      // Reload workspaces to show the new one
       await loadWorkspaces();
       setShowCreateModal(false);
     } catch (error) {
       console.error('Error creating workspace:', error);
-      alert('Failed to create workspace. Please try again.');
+      // Error toast already shown above
     }
   };
 
   const handleDeleteWorkspace = async (workspace: Workspace) => {
-    if (!workspace.isOwner) return;
+    if (!workspace.isOwner) {
+      toast({
+        title: "Permission denied",
+        description: "Only workspace owners can delete workspaces.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     try {
       const { error } = await supabase
@@ -172,10 +205,23 @@ export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProp
         .delete()
         .eq('id', workspace.id);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error deleting workspace:', error);
+        toast({
+          title: "Error deleting workspace",
+          description: error.message,
+          variant: "destructive",
+        });
+        throw error;
+      }
       
       // Remove from local state
       setWorkspaces(prev => prev.filter(w => w.id !== workspace.id));
+      toast({
+        title: "Workspace deleted",
+        description: `"${workspace.name}" has been deleted successfully.`,
+        variant: "default",
+      });
     } catch (error) {
       console.error('Error deleting workspace:', error);
     }
