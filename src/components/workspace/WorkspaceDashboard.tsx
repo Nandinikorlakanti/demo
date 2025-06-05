@@ -68,18 +68,18 @@ export const WorkspaceDashboard = ({ onSelectWorkspace, onOpenGraphBuilder }: Wo
     }
   };
 
-  const handleCreateWorkspace = async (name: string, description: string, color: string) => {
+  const handleCreateWorkspace = async (data: { name: string; description: string; color: string }) => {
     if (!user) return;
 
     try {
-      console.log('Creating workspace:', { name, description, color });
+      console.log('Creating workspace:', data);
       
-      const { data, error } = await supabase
+      const { data: workspace, error } = await supabase
         .from('workspaces')
         .insert({
-          name,
-          description,
-          color,
+          name: data.name,
+          description: data.description,
+          color: data.color,
           owner_id: user.id
         })
         .select()
@@ -90,14 +90,14 @@ export const WorkspaceDashboard = ({ onSelectWorkspace, onOpenGraphBuilder }: Wo
         throw error;
       }
 
-      console.log('Workspace created:', data);
+      console.log('Workspace created:', workspace);
       
       // Transform the new workspace to match expected type
       const newWorkspace: Workspace = {
-        ...data,
+        ...workspace,
         memberCount: 1,
         documentCount: 0,
-        lastAccessed: data.created_at,
+        lastAccessed: workspace.created_at,
         isOwner: true
       };
 
@@ -107,6 +107,16 @@ export const WorkspaceDashboard = ({ onSelectWorkspace, onOpenGraphBuilder }: Wo
       console.error('Error creating workspace:', error);
       alert('Failed to create workspace. Please try again.');
     }
+  };
+
+  const handleEditWorkspace = (workspace: Workspace) => {
+    // TODO: Implement edit functionality
+    console.log('Edit workspace:', workspace);
+  };
+
+  const handleDeleteWorkspace = (workspace: Workspace) => {
+    // TODO: Implement delete functionality
+    console.log('Delete workspace:', workspace);
   };
 
   return (
@@ -154,7 +164,9 @@ export const WorkspaceDashboard = ({ onSelectWorkspace, onOpenGraphBuilder }: Wo
             <WorkspaceCard
               key={workspace.id}
               workspace={workspace}
-              onClick={() => onSelectWorkspace(workspace)}
+              onOpen={onSelectWorkspace}
+              onEdit={handleEditWorkspace}
+              onDelete={handleDeleteWorkspace}
             />
           ))}
         </div>
