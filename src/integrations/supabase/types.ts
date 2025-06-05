@@ -469,6 +469,14 @@ export type Database = {
         Args: { workspace_id: string }
         Returns: boolean
       }
+      user_can_access_workspace: {
+        Args: { workspace_id: string }
+        Returns: boolean
+      }
+      user_owns_workspace: {
+        Args: { workspace_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       document_block_type:
