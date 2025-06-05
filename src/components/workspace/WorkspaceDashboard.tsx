@@ -1,86 +1,158 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Plus, Search, Grid, List } from 'lucide-react';
 import { WorkspaceCard } from './WorkspaceCard';
 import { CreateWorkspaceModal } from './CreateWorkspaceModal';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/components/auth/AuthContext';
+import type { Tables } from '@/integrations/supabase/types';
 
-interface Workspace {
-  id: string;
-  name: string;
-  description: string;
-  color: string;
+type Workspace = Tables<'workspaces'> & {
   memberCount: number;
   documentCount: number;
   lastAccessed: string;
   isOwner: boolean;
-}
+};
 
 interface WorkspaceDashboardProps {
   onSelectWorkspace: (workspace: Workspace) => void;
 }
 
 export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProps) => {
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Mock data - in real app this would come from API
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([
-    {
-      id: '1',
-      name: 'Personal Projects',
-      description: 'My personal workspace for side projects and ideas',
-      color: '#3B82F6',
-      memberCount: 1,
-      documentCount: 12,
-      lastAccessed: '2 hours ago',
-      isOwner: true,
-    },
-    {
-      id: '2',
-      name: 'Team Alpha',
-      description: 'Collaborative workspace for the Alpha team projects',
-      color: '#8B5CF6',
-      memberCount: 5,
-      documentCount: 28,
-      lastAccessed: '1 day ago',
-      isOwner: true,
-    },
-    {
-      id: '3',
-      name: 'Research & Development',
-      description: 'R&D documentation and research materials',
-      color: '#10B981',
-      memberCount: 8,
-      documentCount: 45,
-      lastAccessed: '3 days ago',
-      isOwner: false,
-    },
-  ]);
+  useEffect(() => {
+    if (user) {
+      loadWorkspaces();
+    }
+  }, [user]);
+
+  const loadWorkspaces = async () => {
+    if (!user) return;
+
+    try {
+      // Get workspaces where user is owner or member
+      const { data: workspacesData, error } = await supabase
+        .from('workspaces')
+        .select(`
+          *,
+          workspace_members!inner(role)
+        `)
+        .or(`owner_id.eq.${user.id},workspace_members.user_id.eq.${user.id}`);
+
+      if (error) throw error;
+
+      // Get additional data for each workspace
+      const enrichedWorkspaces = await Promise.all(
+        (workspacesData || []).map(async (workspace) => {
+          // Get member count
+          const { count: memberCount } = await supabase
+            .from('workspace_members')
+            .select('*', { count: 'exact' })
+            .eq('workspace_id', workspace.id);
+
+          // Get document count
+          const { count: documentCount } = await supabase
+            .from('files')
+            .select('*', { count: 'exact' })
+            .eq('workspace_id', workspace.id)
+            .eq('is_folder', false);
+
+          // Check if user is owner
+          const isOwner = workspace.owner_id === user.id;
+
+          return {
+            ...workspace,
+            memberCount: memberCount || 0,
+            documentCount: documentCount || 0,
+            lastAccessed: new Date(workspace.updated_at).toLocaleDateString(),
+            isOwner
+          };
+        })
+      );
+
+      setWorkspaces(enrichedWorkspaces);
+    } catch (error) {
+      console.error('Error loading workspaces:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const filteredWorkspaces = workspaces.filter(workspace =>
     workspace.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    workspace.description.toLowerCase().includes(searchQuery.toLowerCase())
+    workspace.description?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleCreateWorkspace = (workspaceData: { name: string; description: string; color: string }) => {
-    const newWorkspace: Workspace = {
-      id: Date.now().toString(),
-      ...workspaceData,
-      memberCount: 1,
-      documentCount: 0,
-      lastAccessed: 'Just now',
-      isOwner: true,
-    };
-    setWorkspaces([newWorkspace, ...workspaces]);
-    setShowCreateModal(false);
+  const handleCreateWorkspace = async (workspaceData: { name: string; description: string; color: string }) => {
+    if (!user) return;
+
+    try {
+      const { data: newWorkspace, error } = await supabase
+        .from('workspaces')
+        .insert({
+          name: workspaceData.name,
+          description: workspaceData.description,
+          color: workspaceData.color,
+          owner_id: user.id
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Add user as workspace member
+      await supabase
+        .from('workspace_members')
+        .insert({
+          workspace_id: newWorkspace.id,
+          user_id: user.id,
+          role: 'owner'
+        });
+
+      // Reload workspaces
+      loadWorkspaces();
+      setShowCreateModal(false);
+    } catch (error) {
+      console.error('Error creating workspace:', error);
+    }
   };
 
-  const handleDeleteWorkspace = (workspace: Workspace) => {
-    setWorkspaces(workspaces.filter(w => w.id !== workspace.id));
+  const handleDeleteWorkspace = async (workspace: Workspace) => {
+    if (!workspace.isOwner) return;
+
+    try {
+      const { error } = await supabase
+        .from('workspaces')
+        .delete()
+        .eq('id', workspace.id);
+
+      if (error) throw error;
+      
+      // Remove from local state
+      setWorkspaces(prev => prev.filter(w => w.id !== workspace.id));
+    } catch (error) {
+      console.error('Error deleting workspace:', error);
+    }
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-slate-600">Loading workspaces...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 p-6">
@@ -143,9 +215,11 @@ export const WorkspaceDashboard = ({ onSelectWorkspace }: WorkspaceDashboardProp
           ))}
         </div>
 
-        {filteredWorkspaces.length === 0 && (
+        {filteredWorkspaces.length === 0 && !isLoading && (
           <div className="text-center py-12">
-            <p className="text-slate-500 mb-4">No workspaces found</p>
+            <p className="text-slate-500 mb-4">
+              {searchQuery ? 'No workspaces found' : 'No workspaces yet'}
+            </p>
             <Button 
               onClick={() => setShowCreateModal(true)}
               variant="outline"
